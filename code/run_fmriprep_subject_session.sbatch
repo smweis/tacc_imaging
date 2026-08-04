@@ -12,7 +12,11 @@
 #SBATCH -A ACCOUNT_CODE
 #SBATCH --mail-user=YOUR_EMAIL@domain.com
 
-# Submit from the BIDS root directory:
+# Submit via the launcher (recommended: works from any directory, tags job
+# name/log files with subject/session):
+#   code/submit_fmriprep.sh <SUBJECT_ID> <SESSION_ID> [--dry-run]
+#
+# Or submit directly (must run from the BIDS root):
 #   sbatch code/run_fmriprep_subject_session.sbatch <SUBJECT_ID> <SESSION_ID> [--dry-run]
 #
 # SUBJECT_ID: WITHOUT "sub-"
@@ -20,7 +24,10 @@
 
 set -eo pipefail
 
-BIDS_DIR="$SLURM_SUBMIT_DIR"
+# Slurm runs a spooled copy of this script, so it can't self-locate via
+# BASH_SOURCE. submit_fmriprep.sh exports SUBMIT_BIDS_DIR; direct sbatch
+# submission falls back to SLURM_SUBMIT_DIR (the submission directory).
+BIDS_DIR="${SUBMIT_BIDS_DIR:-$SLURM_SUBMIT_DIR}"
 SCRIPT_DIR="$BIDS_DIR/code"
 PROJECT_DIR="$(dirname "$BIDS_DIR")"
 

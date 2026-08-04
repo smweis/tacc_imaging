@@ -73,6 +73,17 @@ if [[ ! -f "$ZIP_PATH" ]]; then
     exit 1
 fi
 
+if [[ ! -r "$ZIP_PATH" ]]; then
+    echo "Zip file not readable, attempting to fix permissions: $ZIP_PATH"
+    chmod g+r "$ZIP_PATH" 2>/dev/null || true
+fi
+
+if [[ ! -r "$ZIP_PATH" ]]; then
+    echo "ERROR: no read permission on zip file: $ZIP_PATH"
+    echo "Ask the file owner to run: chmod g+r $ZIP_PATH"
+    exit 1
+fi
+
 module reset
 source "$PROJECT_DIR/venvs/dcm2bids/bin/activate"
 

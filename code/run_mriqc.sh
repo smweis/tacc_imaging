@@ -11,7 +11,11 @@
 #SBATCH -A ACCOUNT_CODE
 #SBATCH --mail-user=YOUR_EMAIL@domain.com
 
-# Submit from the BIDS root directory:
+# Submit via the launcher (recommended: works from any directory, tags job
+# name/log files with subject/session):
+#   code/submit_mriqc.sh <SUBJECT_ID> <SESSION_ID> [--dry-run]
+#
+# Or submit directly (must run from the BIDS root):
 #   sbatch code/run_mriqc.sh <SUBJECT_ID> <SESSION_ID> [--dry-run]
 
 module reset
@@ -19,13 +23,19 @@ module load tacc-apptainer/1.1.8
 
 set -euo pipefail
 
-BIDS_DIR="$SLURM_SUBMIT_DIR"
+# Slurm runs a spooled copy of this script, so it can't self-locate via
+# BASH_SOURCE. submit_mriqc.sh exports SUBMIT_BIDS_DIR; direct sbatch
+# submission falls back to SLURM_SUBMIT_DIR (the submission directory).
+BIDS_DIR="${SUBMIT_BIDS_DIR:-$SLURM_SUBMIT_DIR}"
 SCRIPT_DIR="$BIDS_DIR/code"
 PROJECT_DIR="$(dirname "$BIDS_DIR")"
 
 usage() {
     cat <<EOF
-Usage:
+Usage (recommended, works from any directory, tags job name/log files with subject/session):
+  code/submit_mriqc.sh <SUBJECT_ID> <SESSION_ID> [--dry-run]
+
+Usage (direct submit, run from the BIDS root; log filenames not tagged with subject/session):
   sbatch code/$0 <SUBJECT_ID> <SESSION_ID> [--dry-run]
 
 Required:
@@ -36,10 +46,8 @@ Optional:
   --dry-run     Print resolved paths and the command that would run, then exit
 
 Examples:
-  sbatch code/$0 1501 01
-  sbatch code/$0 1501 02 --dry-run
-
-Run sbatch from the BIDS root directory so logs/ resolves correctly.
+  code/submit_mriqc.sh 1501 01
+  code/submit_mriqc.sh 1501 02 --dry-run
 EOF
 }
 

@@ -10,21 +10,37 @@
 #SBATCH -A ACCOUNT_CODE
 #SBATCH --mail-user=YOUR_EMAIL@domain.com
 
-# Submit from the BIDS root directory:
+# Submit via the launcher (recommended: works from any directory, tags job
+# name/log files with subject/session):
+#   code/submit_dcm2bids.sh <SUBJECT_ID> <SESSION_ID> <ZIP_FILE> <--copy-template | --use-existing-config> [--validate] [--re-run] [--dry-run]
+#
+# Or submit directly (must run from the BIDS root; log filenames won't be
+# tagged with subject/session):
 #   sbatch code/run_dcm2bids.sh <SUBJECT_ID> <SESSION_ID> <ZIP_FILE> <--copy-template | --use-existing-config> [--validate] [--re-run] [--dry-run]
 
 set -euo pipefail
 
-BIDS_DIR="$SLURM_SUBMIT_DIR"
+# Slurm runs a spooled copy of this script, so it can't self-locate via
+# BASH_SOURCE. submit_dcm2bids.sh exports SUBMIT_BIDS_DIR; direct sbatch
+# submission falls back to SLURM_SUBMIT_DIR (the submission directory).
+BIDS_DIR="${SUBMIT_BIDS_DIR:-$SLURM_SUBMIT_DIR}"
 SCRIPT_DIR="$BIDS_DIR/code"
 PROJECT_DIR="$(dirname "$BIDS_DIR")"
+
+if [ ! -f "$BIDS_DIR/dataset_description.json" ] || [ ! -d "$BIDS_DIR/sourcedata" ]; then
+    echo "ERROR: BIDS directory structure looks wrong (missing dataset_description.json or sourcedata/) at: $BIDS_DIR"
+    exit 1
+fi
 
 module reset
 source "$PROJECT_DIR/venvs/dcm2bids/bin/activate"
 
 usage() {
     cat <<EOF
-Usage:
+Usage (recommended, works from any directory, tags job name/log files with subject/session):
+  code/submit_dcm2bids.sh <SUBJECT_ID> <SESSION_ID> <ZIP_FILE> <--copy-template | --use-existing-config> [--validate] [--re-run] [--dry-run]
+
+Usage (direct submit, run from the BIDS root; log filenames not tagged with subject/session):
   sbatch code/$0 <SUBJECT_ID> <SESSION_ID> <ZIP_FILE> <--copy-template | --use-existing-config> [--validate] [--re-run] [--dry-run]
 
 Required:
@@ -40,15 +56,16 @@ Optional:
   --dry-run               Print resolved paths and commands that would run, then exit
 
 Examples:
-  sbatch code/$0 1501 01 1501_ses01.zip --copy-template
-  sbatch code/$0 1501 02 1501_ses02.zip --use-existing-config --validate
-  sbatch code/$0 1501 01 1501_ses01.zip --copy-template --dry-run
+  code/submit_dcm2bids.sh 1501 01 1501_ses01.zip --copy-template
+  code/submit_dcm2bids.sh 1501 02 1501_ses02.zip --use-existing-config --validate
+  code/submit_dcm2bids.sh 1501 01 1501_ses01.zip --copy-template --dry-run
 
 Important:
   SUBJECT_ID should NOT include 'sub-'.
   SESSION_ID should NOT include 'ses-'.
   ZIP_FILE must exist in sourcedata/.
-  Run sbatch from the BIDS root directory so logs/ resolves correctly.
+  Direct submit (sbatch, not the launcher) must run from the BIDS root
+  directory.
 EOF
 }
 
@@ -126,6 +143,7 @@ SUB_TMP_DIR="$TMP_ROOT/${SUBID}_${SESID}"
 TEMPLATE_JSON="$CONFIG_DIR/dcm2bids_config_ses-${SESSION_ID}_template.json"
 CONFIG_JSON="$CONFIG_DIR/dcm2bids_config_sub-${RAW_SUBID}_ses-${SESSION_ID}.json"
 SUB_OUT_DIR="$BIDS_DIR/$SUBID/$SESID"
+TMP_DCM2BIDS_DIR="$BIDS_DIR/tmp_dcm2bids/$SUBID/$SESID"
 
 echo "=============================="
 echo "BIDS DIR:     $BIDS_DIR"
@@ -146,9 +164,22 @@ if [ ! -f "$ZIP_PATH" ]; then
     exit 1
 fi
 
+if [ ! -r "$ZIP_PATH" ]; then
+    echo "Zip file not readable, attempting to fix permissions: $ZIP_PATH"
+    chmod g+r "$ZIP_PATH" 2>/dev/null || true
+fi
+
+if [ ! -r "$ZIP_PATH" ]; then
+    echo "ERROR: no read permission on zip file: $ZIP_PATH"
+    echo "Ask the file owner to run: chmod g+r $ZIP_PATH"
+    exit 1
+fi
+
 if [ "$DRYRUN" = true ]; then
     echo ""
     echo "DRY-RUN: would execute:"
+    [ "$RERUN" = true ] && echo "  rm -rf $SUB_OUT_DIR"
+    [ "$RERUN" = true ] && echo "  rm -rf $TMP_DCM2BIDS_DIR"
     echo "  unzip -o $ZIP_PATH -d $SCRATCH_SRC"
     echo "  dcm2bids -d $SCRATCH_SRC -p $RAW_SUBID -s $SESSION_ID -c $CONFIG_JSON -o $BIDS_DIR"
     [ "$VALIDATE" = true ] && echo "  bids-validator-deno $BIDS_DIR"
@@ -180,6 +211,8 @@ esac
 if [ "$RERUN" = true ]; then
     echo "Removing existing BIDS output for $SUBID $SESID"
     rm -rf "$SUB_OUT_DIR"
+    echo "Removing existing tmp_dcm2bids directory for $SUBID $SESID"
+    rm -rf "$TMP_DCM2BIDS_DIR"
 fi
 
 echo "Extracting DICOMs to scratch: $SCRATCH_SRC"
